@@ -1,0 +1,57 @@
+[project]
+name = "assessment-shared"
+version = "0.1.0"
+description = "Shared simulation module for technical assessments"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Core dependencies
+    "httpx>=0.25.0",
+    "pydantic>=2.0.0",
+    "pydantic-ai>=0.0.10",
+    "python-dotenv>=1.0.0",
+    # For LLM Researcher assessment
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scikit-learn>=1.3.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    # For Agentic AI Engineer assessment
+    "langgraph>=0.0.40",
+    "langchain>=0.1.0",
+    "langchain-openai>=0.0.5",
+    # Testing and benchmarking
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.optional-dependencies]
+rl = [
+    # For advanced routing research (RL-based)
+    "torch>=2.0.0",
+    "gymnasium>=0.29.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

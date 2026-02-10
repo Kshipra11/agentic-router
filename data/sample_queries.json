@@ -1,0 +1,17 @@
+{
+    "simple": [
+        "What color do you get when you mix red and blue?"
+    ],
+    "moderate": [
+        "How does a blockchain work and what are its main use cases?"
+    ],
+    "complex": [
+        "Explain the mathematical foundations of transformer attention mechanisms and their computational complexity implications."
+    ],
+    "reasoning": [
+        "Three people check into a hotel room that costs $30. They each contribute $10. Later, the clerk realizes the room only costs $25 and gives $5 to the bellboy to return. The bellboy keeps $2 and gives $1 back to each guest. Now each guest has paid $9 (total $27), plus the bellboy has $2. That's only $29. Where did the other dollar go?"
+    ],
+    "coding": [
+        "Implement a rate limiter using the token bucket algorithm in Python."
+    ]
+}

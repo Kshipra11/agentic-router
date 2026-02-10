@@ -1,0 +1,12 @@
+.claude/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+build/
+.env
+uv.lock
+zips/**.zip
+.DS_Store
