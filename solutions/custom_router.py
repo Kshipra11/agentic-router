@@ -1,404 +1,357 @@
 """
 Custom Router Implementation.
 
-================================================================================
-CANDIDATE INSTRUCTIONS
-================================================================================
+This module provides the CustomRouter class that wraps the LangGraph pipeline
+and implements the BaseRouter interface required by the benchmarking system.
 
-This is the file where you should implement your final routing strategy.
-Extend the BaseRouter class and implement the required methods.
-
-You may add additional files in this solutions/ folder as needed:
-- Helper modules (e.g., classifier.py, features.py)
-- Data files (e.g., training data, lookup tables)
-- Tests for your implementation
-
-However, your FINAL router implementation must be in this file (custom_router.py)
-and the main class must be named `CustomRouter`.
-
-================================================================================
-GOAL
-================================================================================
-
-Create a router that intelligently routes queries to the best model/deployment
-combination based on query characteristics, optimizing for quality, latency, and cost.
-
-================================================================================
-BASELINE LIMITATIONS TO ADDRESS (pick one or more)
-================================================================================
-
-1. Query complexity detection - route simple queries to fast/cheap models
-2. Intent classification - match query type to model strengths
-3. Cost optimization - minimize cost while meeting quality thresholds
-4. Latency optimization - meet latency SLAs by smart edge/cloud decisions
-5. Quality optimization - maximize quality within budget constraints
-6. Adaptive routing - learn from past performance
-7. Fallback strategies - handle model failures gracefully
-
-================================================================================
-AVAILABLE RESOURCES
-================================================================================
-
-- MODEL_REGISTRY: Dict of model configurations (tier, costs, etc.)
-- ModelTier: Enum (SMALL, MEDIUM, LARGE, REASONING)
-- EDGE_COMPATIBLE_MODELS: List of models that can run on edge (SMALL tier only)
-- get_latency_multiplier(): Get latency multiplier for model/deployment combo
-
-================================================================================
-CONSTRAINTS
-================================================================================
-
-- Only SMALL tier models can be deployed on edge
-- Edge deployment has 0.2x latency multiplier (5x faster than cloud)
-- Cloud deployment has 1.0x latency multiplier (baseline)
+The router:
+1. Invokes the LangGraph pipeline for each query
+2. Extracts the routing decision from the pipeline result
+3. Applies guardrails to ensure valid routing decisions
+4. Returns (model_key, deployment) tuple as required by BaseRouter
 """
 
-from typing import Optional, List, Tuple, Dict, Any
+import logging
+import time
+from typing import Optional, Tuple, List, Dict, Any
 
 from src.router import BaseRouter
-from src.model_registry import (
-    MODEL_REGISTRY,
-    ModelTier,
-    ModelConfig,
-    EDGE_COMPATIBLE_MODELS,
-    CLOUD_MODELS,
-    get_models_by_tier,
-)
+from src.model_registry import MODEL_REGISTRY, get_edge_compatible_models, CLOUD_MODELS
+
+from .pipeline import build_routing_graph
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class CustomRouter(BaseRouter):
     """
-    Custom router implementation for intelligent query routing.
-
-    TODO: Implement your routing strategy here.
-
-    Your router should decide:
-    1. Which model to use for a given query
-    2. Where to deploy (edge or cloud)
-
-    Consider these factors:
-    - Query complexity (simple vs complex)
-    - Query type/intent (coding, reasoning, factual, creative, etc.)
-    - Latency requirements
-    - Cost constraints
-    - Quality requirements
+    Agentic router using LangGraph pipeline.
+    
+    This router uses a multi-step LLM-powered pipeline to intelligently route
+    queries to the optimal model and deployment location. The pipeline:
+    
+    1. Classifies query intent (coding, reasoning, factual, etc.)
+    2. Scores mission-criticality (how important is correctness?)
+    3. Scores latency-criticality (how time-sensitive is the response?)
+    4. Makes final routing decision (selects model + deployment)
+    
+    The router applies guardrails to ensure all routing decisions are valid
+    and never crashes, even if the pipeline fails.
+    
+    Example:
+        >>> router = CustomRouter()
+        >>> model_key, deployment = router.route("Write a Python function")
+        >>> print(f"{model_key}@{deployment}")
+        mistral-small-24b@cloud
     """
-
-    def __init__(
-        self,
-        # TODO: Add any configuration parameters your router needs
-    ):
+    
+    def __init__(self):
         """
-        Initialize the custom router.
-
-        TODO: Implement initialization logic.
-
-        Consider initializing:
-        - Configuration parameters
-        - Query classifier (if using ML-based classification)
-        - Model performance cache (if doing adaptive routing)
-        - Any pre-computed routing rules
+        Initialize the CustomRouter.
+        
+        Builds the LangGraph pipeline and sets up internal state.
         """
         super().__init__()
-
-        # TODO: Initialize your router's state here
-        pass
-
+        self.graph = build_routing_graph()
+        self.last_trace = None  # Store last pipeline execution trace for debugging
+        self.trace_history: List[Dict[str, Any]] = []  # Store structured traces for evaluation
+    
     @property
     def name(self) -> str:
         """
-        Return a descriptive name for this router.
-
-        TODO: Return a name that describes your routing strategy.
-
-        Examples:
-        - "ComplexityAware"
-        - "IntentBased"
-        - "CostOptimized"
-        - "AdaptiveQuality"
+        Return the router name for identification in benchmarks.
+        
+        Returns:
+            Router name string
         """
-        return "Custom"
-
+        return "AgenticRouter"
+    
     def route(
         self,
         query: str,
-        available_models: Optional[List[str]] = None
+        available_models: Optional[list[str]] = None
     ) -> Tuple[str, str]:
         """
-        Route a query to a model and deployment.
-
-        TODO: Implement your routing logic here.
-
+        Route a query to a model and deployment using the agentic pipeline.
+        
+        This method:
+        1. Invokes the LangGraph pipeline with the query
+        2. Extracts the routing decision from the pipeline result
+        3. Applies guardrails to ensure the decision is valid
+        4. Returns (model_key, deployment) tuple
+        
         Args:
             query: The user query to route
-            available_models: Optional list of models to choose from
-                            (defaults to all models if None)
-
+            available_models: Optional list of model keys to choose from.
+                            If None, defaults to all CLOUD_MODELS.
+                            
         Returns:
             Tuple of (model_key, deployment) where:
-            - model_key: Key from MODEL_REGISTRY (e.g., "gemma-3-4b", "llama-3.3-70b")
+            - model_key: Key from MODEL_REGISTRY (e.g., "gemma-3-4b", "mistral-small-24b")
             - deployment: "edge" or "cloud"
-
-        IMPORTANT CONSTRAINTS:
-        - Only SMALL tier models can be deployed on "edge"
-        - All models can be deployed on "cloud"
-        - If you return an invalid combination, the benchmark will fail
+            
+        Note:
+            The router never crashes. If the pipeline fails, it returns a safe
+            fallback routing decision.
         """
         self.call_count += 1
-        pass
-
-    # =========================================================================
-    # OPTIONAL HELPER METHODS
-    # Implement these if they help your routing strategy
-    # =========================================================================
-
-    def _analyze_query(self, query: str) -> Dict[str, Any]:
-        """
-        Analyze a query to extract features for routing decisions.
-
-        TODO: Implement query analysis (optional but recommended).
-
-        Suggested features to extract:
-        - length: Number of characters/words/tokens
-        - complexity_score: Estimated complexity (simple/moderate/complex)
-        - intent: Query type (factual, reasoning, coding, creative, etc.)
-        - domain: Subject area (math, science, general, etc.)
-        - requires_reasoning: Whether deep reasoning is needed
-        - requires_code: Whether code generation is needed
-
-        Returns:
-            Dict with query features
-        """
-        # TODO: Implement query analysis
-        # Example:
-        # return {
-        #     "length": len(query),
-        #     "word_count": len(query.split()),
-        #     "complexity": self._estimate_complexity(query),
-        #     "intent": self._classify_intent(query),
-        #     "has_code_keywords": any(kw in query.lower() for kw in ["code", "function", "implement"]),
-        # }
-
-        pass
-
-    def _estimate_complexity(self, query: str) -> str:
-        """
-        Estimate query complexity.
-
-        TODO: Implement complexity estimation (optional).
-
-        Approaches:
-        - Rule-based: keyword matching, length thresholds
-        - ML-based: trained classifier
-        - Hybrid: rules + simple heuristics
-
-        Returns:
-            One of: "simple", "moderate", "complex"
-        """
-        # TODO: Implement complexity estimation
-        # Example rule-based approach:
-        # if len(query.split()) < 10:
-        #     return "simple"
-        # elif any(kw in query.lower() for kw in ["explain", "analyze", "compare"]):
-        #     return "complex"
-        # else:
-        #     return "moderate"
-
-        pass
-
-    def _classify_intent(self, query: str) -> str:
-        """
-        Classify the intent/type of query.
-
-        TODO: Implement intent classification (optional).
-
-        Suggested categories:
-        - "factual": Simple fact lookup
-        - "reasoning": Requires logical reasoning
-        - "coding": Code generation/debugging
-        - "creative": Creative writing
-        - "analysis": Data/text analysis
-        - "math": Mathematical problems
-
-        Returns:
-            Intent category string
-        """
-        # TODO: Implement intent classification
-        # Example keyword-based approach:
-        # query_lower = query.lower()
-        # if any(kw in query_lower for kw in ["write code", "implement", "function"]):
-        #     return "coding"
-        # elif any(kw in query_lower for kw in ["why", "explain", "reason"]):
-        #     return "reasoning"
-        # else:
-        #     return "factual"
-
-        pass
-
-    def _select_tier(self, query_features: Dict[str, Any]) -> ModelTier:
-        """
-        Select the appropriate model tier based on query features.
-
-        TODO: Implement tier selection logic (optional).
-
-        Guidelines:
-        - SMALL: Simple queries, low latency requirements
-        - MEDIUM: Moderate complexity, balanced quality/speed
-        - LARGE: Complex queries requiring high quality
-        - REASONING: Queries requiring deep reasoning/math
-
-        Args:
-            query_features: Features extracted from _analyze_query()
-
-        Returns:
-            ModelTier enum value
-        """
-        # TODO: Implement tier selection
-        # Example:
-        # complexity = query_features.get("complexity", "moderate")
-        # intent = query_features.get("intent", "factual")
-        #
-        # if intent == "reasoning" or complexity == "complex":
-        #     return ModelTier.REASONING
-        # elif complexity == "simple":
-        #     return ModelTier.SMALL
-        # else:
-        #     return ModelTier.MEDIUM
-
-        pass
-
-    def _select_model(
+        
+        # Determine allowed models (default to all cloud models if not specified)
+        allowed_models = available_models or CLOUD_MODELS
+        
+        # Start timing for routing overhead
+        routing_start_time = time.time()
+        
+        logger.info("=" * 80)
+        logger.info(f"[CUSTOM_ROUTER] Routing query (call #{self.call_count})")
+        logger.info(f"Query: {query[:100]}{'...' if len(query) > 100 else ''}")
+        logger.info(f"Allowed models: {len(allowed_models)} models")
+        logger.info("=" * 80)
+        
+        try:
+            # Invoke the LangGraph pipeline
+            pipeline_result = self.graph.invoke({
+                "query": query,
+                "allowed_models": allowed_models,
+            })
+            
+            # Calculate routing overhead (time spent in pipeline)
+            routing_overhead_ms = (time.time() - routing_start_time) * 1000
+            
+            # Extract costs and timing from traces
+            traces = pipeline_result.get("traces", {})
+            total_routing_cost = 0.0
+            step_timings = {}
+            
+            for step_name, step_trace in traces.items():
+                if isinstance(step_trace, dict):
+                    # Extract cost
+                    step_cost = step_trace.get("cost", 0.0)
+                    total_routing_cost += step_cost
+                    
+                    # Extract timing
+                    step_duration = step_trace.get("step_duration_s", 0.0)
+                    step_timings[step_name] = step_duration * 1000  # Convert to ms
+            
+            # Store structured trace for evaluation
+            trace_data = {
+                "query": query,
+                "timestamp": time.time(),
+                "routing_overhead_ms": routing_overhead_ms,
+                "routing_cost": total_routing_cost,
+                "step_timings": step_timings,
+                "intent": pipeline_result.get("intent"),
+                "mission_score": (
+                    pipeline_result.get("mission_criticality").score 
+                    if pipeline_result.get("mission_criticality") else None
+                ),
+                "latency_score": (
+                    pipeline_result.get("latency_criticality").score 
+                    if pipeline_result.get("latency_criticality") else None
+                ),
+                "decision": pipeline_result.get("routing_decision"),
+                "full_state": pipeline_result,  # Complete LangGraph state
+            }
+            
+            # Store trace for debugging/inspection
+            self.last_trace = pipeline_result
+            self.trace_history.append(trace_data)
+            
+            # Extract routing decision
+            decision = pipeline_result.get("routing_decision")
+            
+            if decision is None:
+                logger.warning("[CUSTOM_ROUTER] Pipeline returned None decision. Using fallback.")
+                return self._get_fallback_route(allowed_models)
+            
+            # Extract model_key and deployment from decision
+            model_key = decision.model_key
+            deployment = decision.deployment
+            
+            logger.info(f"[CUSTOM_ROUTER] Pipeline decision: {model_key}@{deployment}")
+            logger.info(f"[CUSTOM_ROUTER] Routing overhead: {routing_overhead_ms:.2f}ms, Cost: ${total_routing_cost:.6f}")
+            
+        except Exception as e:
+            logger.error(f"[CUSTOM_ROUTER] Pipeline execution failed: {e}")
+            logger.warning("[CUSTOM_ROUTER] Using fallback route")
+            # Still record trace with error
+            routing_overhead_ms = (time.time() - routing_start_time) * 1000
+            trace_data = {
+                "query": query,
+                "timestamp": time.time(),
+                "routing_overhead_ms": routing_overhead_ms,
+                "routing_cost": 0.0,
+                "step_timings": {},
+                "error": str(e),
+            }
+            self.trace_history.append(trace_data)
+            return self._get_fallback_route(allowed_models)
+        
+        # Apply guardrails to ensure valid routing decision
+        model_key, deployment = self._apply_guardrails(
+            model_key=model_key,
+            deployment=deployment,
+            allowed_models=allowed_models
+        )
+        
+        # Record in history
+        self.routing_history.append((query[:50], model_key, deployment))
+        
+        logger.info(f"[CUSTOM_ROUTER] ✓ Final route: {model_key}@{deployment}")
+        logger.info("=" * 80)
+        
+        return (model_key, deployment)
+    
+    def _apply_guardrails(
         self,
-        tier: ModelTier,
-        available_models: Optional[List[str]] = None
-    ) -> str:
-        """
-        Select a specific model from the target tier.
-
-        TODO: Implement model selection within tier (optional).
-
-        Considerations:
-        - Cost: Choose cheaper model if quality requirements are met
-        - Availability: Filter by available_models if provided
-        - Specialization: Some models may be better for certain tasks
-
-        Args:
-            tier: Target model tier
-            available_models: Optional filter list
-
-        Returns:
-            model_key from MODEL_REGISTRY
-        """
-        # TODO: Implement model selection
-        # Example:
-        # tier_models = get_models_by_tier(tier)
-        # if available_models:
-        #     tier_models = [m for m in tier_models if m in available_models]
-        #
-        # if not tier_models:
-        #     # Fallback to any available model
-        #     return available_models[0] if available_models else "gemma-3-4b"
-        #
-        # # Select cheapest model in tier
-        # return min(tier_models, key=lambda m: MODEL_REGISTRY[m].cost_per_million_input)
-
-        pass
-
-    def update_from_feedback(
-        self,
-        query: str,
         model_key: str,
         deployment: str,
-        quality_score: float,
-        latency_ms: float
-    ) -> None:
+        allowed_models: list[str]
+    ) -> Tuple[str, str]:
         """
-        Update router state based on feedback from a completed request.
-
-        TODO: Implement adaptive learning (optional, for advanced implementations).
-
-        This method is called after each request completes with the actual
-        quality and latency observed. Use this to:
-        - Track model performance over time
-        - Adjust routing decisions based on observed outcomes
-        - Implement online learning
-
+        Apply guardrails to ensure routing decision is valid.
+        
+        This function ensures:
+        1. model_key exists in MODEL_REGISTRY
+        2. model_key is in the allowed_models list
+        3. Edge deployment only for SMALL tier models
+        4. Always returns a valid (model_key, deployment) tuple
+        
         Args:
-            query: The original query
-            model_key: Model that was used
-            deployment: Deployment that was used
-            quality_score: Quality score (0-10) from evaluation
-            latency_ms: Actual latency in milliseconds
+            model_key: Model key from pipeline decision
+            deployment: Deployment location from pipeline decision
+            allowed_models: List of allowed model keys
+            
+        Returns:
+            Tuple of (validated_model_key, validated_deployment)
         """
-        # TODO: Implement feedback processing for adaptive routing
-        # Example:
-        # key = f"{model_key}@{deployment}"
-        # if key not in self.model_performance_cache:
-        #     self.model_performance_cache[key] = {"quality": [], "latency": []}
-        # self.model_performance_cache[key]["quality"].append(quality_score)
-        # self.model_performance_cache[key]["latency"].append(latency_ms)
-
-        pass
-
-
-# =============================================================================
-# ALTERNATIVE ROUTER TEMPLATES
-# Uncomment and modify one of these if it better fits your approach
-# =============================================================================
-
-# class ComplexityAwareRouter(BaseRouter):
-#     """Router that routes based on query complexity."""
-#
-#     def __init__(self, complexity_threshold: int = 50):
-#         super().__init__()
-#         self.complexity_threshold = complexity_threshold
-#
-#     @property
-#     def name(self) -> str:
-#         return "ComplexityAware"
-#
-#     def route(self, query: str, available_models: Optional[List[str]] = None) -> Tuple[str, str]:
-#         self.call_count += 1
-#         # Simple heuristic: longer queries are more complex
-#         if len(query) < self.complexity_threshold:
-#             model_key, deployment = "gemma-3-4b", "edge"
-#         else:
-#             model_key, deployment = "llama-3.3-70b", "cloud"
-#         self.routing_history.append((query[:50], model_key, deployment))
-#         return (model_key, deployment)
-
-
-# class IntentBasedRouter(BaseRouter):
-#     """Router that routes based on query intent."""
-#
-#     INTENT_MODEL_MAP = {
-#         "coding": "llama-3.3-70b",
-#         "reasoning": "deepseek-r1-0528",
-#         "simple": "gemma-3-4b",
-#         "default": "mistral-small-24b",
-#     }
-#
-#     def __init__(self):
-#         super().__init__()
-#
-#     @property
-#     def name(self) -> str:
-#         return "IntentBased"
-#
-#     def _detect_intent(self, query: str) -> str:
-#         query_lower = query.lower()
-#         if any(kw in query_lower for kw in ["code", "function", "implement", "debug"]):
-#             return "coding"
-#         elif any(kw in query_lower for kw in ["prove", "derive", "calculate", "solve"]):
-#             return "reasoning"
-#         elif len(query.split()) < 10:
-#             return "simple"
-#         return "default"
-#
-#     def route(self, query: str, available_models: Optional[List[str]] = None) -> Tuple[str, str]:
-#         self.call_count += 1
-#         intent = self._detect_intent(query)
-#         model_key = self.INTENT_MODEL_MAP.get(intent, "mistral-small-24b")
-#         deployment = "edge" if MODEL_REGISTRY[model_key].tier == ModelTier.SMALL else "cloud"
-#         self.routing_history.append((query[:50], model_key, deployment))
-#         return (model_key, deployment)
+        original_model = model_key
+        original_deployment = deployment
+        
+        # Find the registry key - could be a direct key or a model_id
+        registry_key = None
+        if model_key in MODEL_REGISTRY:
+            registry_key = model_key
+        else:
+            # Try to find it as a model_id
+            for k, v in MODEL_REGISTRY.items():
+                if v.model_id == model_key:
+                    registry_key = k
+                    break
+        
+        # Guardrail 1: Ensure model exists in registry
+        if registry_key is None:
+            logger.warning(
+                f"[CUSTOM_ROUTER] Model '{model_key}' not in MODEL_REGISTRY. "
+                f"Using fallback."
+            )
+            registry_key = allowed_models[0] if allowed_models else "gemma-3-4b"
+            deployment = "cloud"
+        
+        # Guardrail 2: Ensure model is in allowed list (allowed_models contains registry keys)
+        if registry_key not in allowed_models:
+            logger.warning(
+                f"[CUSTOM_ROUTER] Model '{registry_key}' not in allowed_models. "
+                f"Using fallback."
+            )
+            registry_key = allowed_models[0] if allowed_models else "gemma-3-4b"
+            deployment = "cloud"
+        
+        # Guardrail 3: Edge deployment constraint using get_edge_compatible_models()
+        if deployment == "edge":
+            edge_compatible_keys = get_edge_compatible_models()
+            if registry_key not in edge_compatible_keys:
+                logger.warning(
+                    f"[CUSTOM_ROUTER] Model '{registry_key}' is not edge-compatible. "
+                    f"Switching to cloud."
+                )
+                deployment = "cloud"
+        
+        # Log if we made any changes
+        if registry_key != original_model or deployment != original_deployment:
+            logger.info(
+                f"[CUSTOM_ROUTER] Guardrails applied: "
+                f"{original_model}@{original_deployment} -> {registry_key}@{deployment}"
+            )
+        
+        return (registry_key, deployment)
+    
+    def _get_fallback_route(self, allowed_models: list[str]) -> Tuple[str, str]:
+        """
+        Get a safe fallback routing decision.
+        
+        This is used when the pipeline fails or returns an invalid decision.
+        The fallback strategy:
+        1. Try to use a SMALL tier model on edge (fastest, cheapest)
+        2. Fall back to MEDIUM tier on cloud (balanced)
+        3. Last resort: first allowed model on cloud
+        
+        Args:
+            allowed_models: List of allowed model keys
+            
+        Returns:
+            Tuple of (model_key, deployment)
+        """
+        # Strategy 1: Try SMALL tier on edge (if available and allowed)
+        edge_compatible_keys = get_edge_compatible_models()
+        for model_key in edge_compatible_keys:
+            if model_key in allowed_models:
+                logger.info(f"[CUSTOM_ROUTER] Fallback: Using {model_key}@edge")
+                return (model_key, "edge")
+        
+        # Strategy 2: Use first allowed model on cloud
+        if allowed_models:
+            fallback_model = allowed_models[0]
+            logger.info(f"[CUSTOM_ROUTER] Fallback: Using {fallback_model}@cloud")
+            return (fallback_model, "cloud")
+        
+        # Strategy 3: Last resort - use default
+        logger.warning("[CUSTOM_ROUTER] Fallback: Using default gemma-3-4b@cloud")
+        return ("gemma-3-4b", "cloud")
+    
+    def get_routing_metrics(self) -> Dict[str, Any]:
+        """
+        Get aggregated routing metrics for evaluation.
+        
+        Returns:
+            Dictionary with:
+            - total_queries: Number of queries routed
+            - avg_routing_overhead_ms: Average time spent in pipeline
+            - total_routing_cost: Total cost of all routing LLM calls
+            - avg_routing_cost_per_query: Average routing cost per query
+            - step_timings_avg: Average time per pipeline step
+        """
+        if not self.trace_history:
+            return {
+                "total_queries": 0,
+                "avg_routing_overhead_ms": 0.0,
+                "total_routing_cost": 0.0,
+                "avg_routing_cost_per_query": 0.0,
+                "step_timings_avg": {},
+            }
+        
+        total_overhead = sum(t["routing_overhead_ms"] for t in self.trace_history)
+        total_cost = sum(t["routing_cost"] for t in self.trace_history)
+        
+        # Aggregate step timings
+        step_timings_sum = {}
+        step_timings_count = {}
+        for trace in self.trace_history:
+            for step, timing in trace.get("step_timings", {}).items():
+                step_timings_sum[step] = step_timings_sum.get(step, 0) + timing
+                step_timings_count[step] = step_timings_count.get(step, 0) + 1
+        
+        step_timings_avg = {
+            step: step_timings_sum[step] / step_timings_count[step]
+            for step in step_timings_sum
+        }
+        
+        n = len(self.trace_history)
+        return {
+            "total_queries": n,
+            "avg_routing_overhead_ms": total_overhead / n,
+            "total_routing_cost": total_cost,
+            "avg_routing_cost_per_query": total_cost / n,
+            "step_timings_avg": step_timings_avg,
+        }
